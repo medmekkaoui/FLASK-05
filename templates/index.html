@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FlaskGPT — Assistant IA</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='dist/css/style.css') }}">
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.2.0/styles/default.min.css">
+
+    <script defer src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.2.0/highlight.min.js"></script>
+    <script defer src="{{ url_for('static', filename='js/script.js') }}"></script>
+</head>
+
+<body class="bg-slate-50 text-slate-800">
+<main class="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6">
+
+    <!-- En-tête : titre, domaine et actions sur la conversation -->
+    <header class="mb-4 flex flex-wrap items-end justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight">FlaskGPT</h1>
+            <p class="mt-1 text-sm text-slate-500">Your intelligent assistant.</p>
+        </div>
+
+        <div class="flex flex-wrap items-end gap-3">
+            <div>
+                <label for="domain" class="block text-xs font-medium text-slate-500">Domaine</label>
+                <select id="domain"
+                        class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500">
+                    {% for d in domains %}
+                    <option value="{{ d.key }}">{{ d.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="export-format" class="block text-xs font-medium text-slate-500">Exporter</label>
+                <div class="flex gap-1">
+                    <select id="export-format"
+                            class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500">
+                        <option value="txt">TXT</option>
+                        <option value="json">JSON</option>
+                        <option value="pdf">PDF</option>
+                    </select>
+                    <button id="export-btn" type="button"
+                            class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-100 disabled:opacity-50">
+                        Télécharger
+                    </button>
+                </div>
+            </div>
+
+            <button id="summary-btn" type="button"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-100 disabled:cursor-wait disabled:opacity-50">
+                Résumé PDF
+            </button>
+
+            <button id="new-chat" type="button"
+                    class="rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white hover:bg-rose-700">
+                Effacer et nouvelle conversation
+            </button>
+        </div>
+    </header>
+
+    <!-- Bandeau d'erreur : messages clairs (clé API, quota, connexion…) -->
+    <div id="error-banner" role="alert" class="mb-4 hidden items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+        <p id="error-text" class="flex-1"></p>
+        <button id="error-close" type="button" aria-label="Fermer" class="font-bold text-red-600 hover:text-red-900">✕</button>
+    </div>
+
+    <div class="grid flex-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+
+        <!-- Conversation -->
+        <section class="flex min-w-0 flex-col">
+            <div id="gpt-output" class="flex-1" aria-live="polite"></div>
+
+            <form id="prompt-form" class="sticky bottom-0 mt-4 flex gap-3 bg-slate-50 py-4">
+                <label for="prompt" class="sr-only">Your message</label>
+                <input id="prompt" name="prompt" type="text" required maxlength="8000" autocomplete="off"
+                       placeholder="Ask your question…"
+                       class="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100">
+                <button type="submit"
+                        class="rounded-xl bg-indigo-600 px-5 py-3 font-medium text-white hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-50">
+                    Send
+                </button>
+            </form>
+        </section>
+
+        <!-- Panneau latéral -->
+        <aside class="space-y-4 text-sm">
+
+            <details open class="rounded-xl border border-slate-200 bg-white p-4">
+                <summary class="cursor-pointer font-semibold">Historique</summary>
+                <ul id="history-list" class="mt-3 space-y-1"></ul>
+            </details>
+
+            <details open class="rounded-xl border border-slate-200 bg-white p-4">
+                <summary class="cursor-pointer font-semibold">Sources et références</summary>
+                <p class="mt-2 text-xs text-slate-500">
+                    Les sources cochées sont consultées pour répondre à la prochaine question.
+                </p>
+                <label class="mt-3 block">
+                    <span class="sr-only">Ajouter une source</span>
+                    <input id="source-file" type="file" accept=".txt,.md,.csv,.json,.log,.pdf"
+                           class="block w-full text-xs file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-indigo-700">
+                </label>
+                <ul id="sources-list" class="mt-3 space-y-1"></ul>
+
+                <div class="mt-4 flex items-end gap-2 border-t border-slate-100 pt-3">
+                    <div class="flex-1">
+                        <label for="src-unit" class="block text-xs text-slate-500">Afficher par</label>
+                        <select id="src-unit" class="w-full rounded-lg border border-slate-300 px-2 py-1">
+                            <option value="extraits">extraits</option>
+                            <option value="paragraphes">paragraphes</option>
+                            <option value="lignes">lignes</option>
+                        </select>
+                    </div>
+                    <div class="w-20">
+                        <label for="src-count" class="block text-xs text-slate-500">Nombre</label>
+                        <input id="src-count" type="number" min="1" max="50" value="2"
+                               class="w-full rounded-lg border border-slate-300 px-2 py-1">
+                    </div>
+                </div>
+                <p class="mt-1 text-xs text-slate-500">Valable pour chaque source, sous chaque réponse.</p>
+            </details>
+
+            <details class="rounded-xl border border-slate-200 bg-white p-4">
+                <summary class="cursor-pointer font-semibold">Performances</summary>
+                <div id="perf-panel" class="mt-3"></div>
+            </details>
+
+            <details class="rounded-xl border border-slate-200 bg-white p-4">
+                <summary class="cursor-pointer font-semibold">Qualité des données</summary>
+                <p class="mt-2 text-xs text-slate-500">
+                    Importez un fichier CSV, Excel, JSON ou SQLite pour auditer sa qualité.
+                </p>
+                <label class="mt-3 block">
+                    <span class="sr-only">Importer un jeu de données</span>
+                    <input id="dataset-file" type="file" accept=".csv,.tsv,.xlsx,.xlsm,.json,.sqlite,.sqlite3,.db"
+                           class="block w-full text-xs file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-indigo-700">
+                </label>
+                <div id="dataset-report" class="mt-3"></div>
+            </details>
+        </aside>
+    </div>
+</main>
+</body>
+</html>
